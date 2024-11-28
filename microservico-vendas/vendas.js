@@ -1,88 +1,98 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const { open } = require('sqlite');
-
+const mysql = require('mysql2'); // Mudando para mysql2
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = 3000;
 
-// Middleware para tratar JSON
-app.use(express.json());
+app.use(express.json()); // Para tratar requisições com corpo em JSON
 
-// Inicializar o banco de dados SQLite
-let db;
-
-(async () => {
-  db = await open({
-    filename: './vendas.db',
-    driver: sqlite3.Database,
-  });
-
-  // Criar tabela de vendas caso não exista
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS vendas (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      produtos TEXT NOT NULL,
-      data TEXT NOT NULL,
-      valor REAL NOT NULL
-    )
-  `);
-})();
-
-// POST - Criar uma venda
-app.post('/vendas', async (req, res) => {
-  try {
-    const { produtos, data, valor } = req.body;
-
-    // Exemplo de chamada futura ao microserviço de Estoque:
-    // Verificar se os produtos estão disponíveis no estoque
-    // const estoqueDisponivel = await verificarEstoque(produtos);
-    // if (!estoqueDisponivel) {
-    //   return res.status(400).json({ message: 'Estoque insuficiente para um ou mais produtos.' });
-    // }
-
-    // Inserir venda no banco
-    const result = await db.run(
-      'INSERT INTO vendas (produtos, data, valor) VALUES (?, ?, ?)',
-      [JSON.stringify(produtos), data, valor]
-    );
-
-    res.status(201).json({ id: result.lastID, message: 'Venda registrada com sucesso!' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Erro ao registrar a venda.' });
-  }
+// Conexão com o banco de dados MySQL (usando variável de ambiente no Railway ou um banco local)
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost', // URL do host do banco
+  user: process.env.DB_USER || 'root', // Nome de usuário do banco
+  password: process.env.DB_PASSWORD || '12345678', // Senha do banco
+  database: process.env.DB_NAME || 'vendas', // Nome do banco de dados
 });
 
-// GET - Listar todas as vendas
-app.get('/vendas', async (req, res) => {
+// Função para criar a tabela de vendas (caso não exista)
+async function createTable() {
   try {
-    const vendas = await db.all('SELECT * FROM vendas');
-    res.status(200).json(vendas);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Erro ao buscar as vendas.' });
+    const query = `
+      CREATE TABLE IF NOT EXISTS vendas (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        produtos TEXT NOT NULL,
+        data_venda TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        valor_total DECIMAL(10, 2) NOT NULL
+      );
+    `;
+    pool.query(query, (err, results) => {
+      if (err) throw err;
+      console.log('Tabela de vendas criada com sucesso.');
+    });
+  } catch (err) {
+    console.error('Erro ao criar tabela:', err);
   }
-});
+}
 
-// DELETE - Deletar uma venda pelo ID
-app.delete('/vendas/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+// Chama a função para criar a tabela ao iniciar o servidor
+createTable();
 
-    const result = await db.run('DELETE FROM vendas WHERE id = ?', id);
+// Rota POST para registrar uma venda
+app.post('/venda', (req, res) => {
+  const { produtos, valor_total } = req.body;
 
-    if (result.changes === 0) {
-      return res.status(404).json({ message: 'Venda não encontrada.' });
+  if (!produtos || !valor_total) {
+    return res.status(400).json({ error: 'Produtos e valor total são obrigatórios.' });
+  }
+
+  const query = 'INSERT INTO vendas (produtos, valor_total) VALUES (?, ?)';
+  pool.query(query, [produtos, valor_total], (err, results) => {
+    if (err) {
+      console.error('Erro ao registrar venda:', err);
+      return res.status(500).json({ error: 'Erro ao registrar venda' });
     }
-
-    res.status(200).json({ message: 'Venda deletada com sucesso!' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Erro ao deletar a venda.' });
-  }
+    res.status(201).json({
+      id: results.insertId,
+      produtos,
+      valor_total,
+      data_venda: new Date(),
+    });
+  });
 });
 
-// Subir o servidor
-app.listen(PORT, () => {
-  console.log(`Microserviço de Vendas rodando na porta ${PORT}`);
+// Rota GET para listar todas as vendas registradas
+app.get('/vendas', (req, res) => {
+  const query = 'SELECT * FROM vendas';
+  pool.query(query, (err, results) => {
+    if (err) {
+      console.error('Erro ao listar vendas:', err);
+      return res.status(500).json({ error: 'Erro ao listar vendas' });
+    }
+    res.status(200).json(results);
+  });
+});
+
+// Rota DELETE para remover uma venda
+app.delete('/venda/:id', (req, res) => {
+  const vendaId = parseInt(req.params.id);
+
+  if (isNaN(vendaId)) {
+    return res.status(400).json({ error: 'ID da venda inválido' });
+  }
+
+  const query = 'DELETE FROM vendas WHERE id = ?';
+  pool.query(query, [vendaId], (err, results) => {
+    if (err) {
+      console.error('Erro ao deletar venda:', err);
+      return res.status(500).json({ error: 'Erro ao deletar venda' });
+    }
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: 'Venda não encontrada' });
+    }
+    res.status(200).json({ message: 'Venda deletada com sucesso' });
+  });
+});
+
+// Inicia o servidor
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
 });
