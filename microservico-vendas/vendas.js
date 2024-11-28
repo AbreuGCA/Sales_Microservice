@@ -7,9 +7,9 @@ app.use(express.json()); // Para tratar requisições com corpo em JSON
 
 // Conexão com o banco de dados MySQL (usando variável de ambiente no Railway ou um banco local)
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost', // URL do host do banco
-  user: process.env.DB_USER || 'root', // Nome de usuário do banco
-  password: process.env.DB_PASSWORD || '12345678', // Senha do banco
+  host: process.env.MYSQLHOST || 'localhost', // URL do host do banco
+  user: process.env.MYSQLUSER || 'root', // Nome de usuário do banco
+  password: process.env.MYSQLPASSWORD || '12345678', // Senha do banco
   database: process.env.DB_NAME || 'vendas', // Nome do banco de dados
 });
 
